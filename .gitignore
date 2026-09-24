@@ -1,0 +1,10 @@
+.env
+__pycache__/
+.venv/
+.pytest_cache/
+*.png
+# kişisel bilgi / oturum verisi içeren ham sayfa kayıtları
+/*.html
+/*.txt
+!/requirements.txt
+/gozlem.csv
