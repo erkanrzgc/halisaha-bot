@@ -20,9 +20,14 @@ copy .env.example .env   # içini doldur
 1. @BotFather → `/newbot` → token → `TG_TOKEN`
 2. Botuna bir mesaj at, sonra `https://api.telegram.org/bot<TOKEN>/getUpdates` aç → `chat.id` → `TG_CHAT_ID`
 
-## GitHub Actions
-Repo **private**. Settings → Secrets → Actions: `SPOR_TC`, `SPOR_SIFRE`, `TG_TOKEN`, `TG_CHAT_ID`.
-İlk test: Actions → halisaha → Run workflow (dry_run açık). IP engeli varsa PC/VPS'te çalıştır.
+## Nöbetçi (önerilen kullanım)
+`calistir.bat` → 4. Sürekli çalışır: iki sahayı izler, değişiklikleri `gozlem.csv`'ye yazar,
+hedef seans boş görünce alır. Geçmiş açılış saatlerini öğrenip o saatlerde 3 sn'de bir, diğer
+zamanlarda 10 sn'de bir bakar. Analiz: `calistir.bat` → 5.
+
+## GitHub Actions (çalışmıyor)
+Site, GitHub sunucularına Cloudflare doğrulaması gösteriyor (HTTP 403). Bot bu yüzden
+Türkiye'deki bir ev internetinden (PC) çalışmalı.
 
 ## Seçenekler
 - `--sure 15` 15 dk boyunca dener, `--aralik 3` denemeler arası saniye (min 2)

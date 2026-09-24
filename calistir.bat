@@ -20,7 +20,7 @@ echo.
 echo  1) Deneme (tiklamaz, Telegram'a rapor atar)
 echo  2) Tek tur bak, bos varsa al
 echo  3) 10 dakika boyunca dene (acilis saati)
-echo  4) Gozlemci (surekli calisir, gozlem.csv'ye yazar, Ctrl+C ile durur)
+echo  4) NOBETCI: surekli izler, kaydeder, bos hedef seans gorunce alir (Ctrl+C ile durur)
 echo  5) Gozlem analizi (hangi seans kacta acildi / kapildi)
 echo.
 set /p SECIM=Secim (1-5):
@@ -28,7 +28,7 @@ set /p SECIM=Secim (1-5):
 if "%SECIM%"=="1" .venv\Scripts\python -m bot.main --dry-run
 if "%SECIM%"=="2" .venv\Scripts\python -m bot.main
 if "%SECIM%"=="3" .venv\Scripts\python -m bot.main --sure 10
-if "%SECIM%"=="4" .venv\Scripts\python -m bot.gozlem
+if "%SECIM%"=="4" .venv\Scripts\python -m bot.nobetci
 if "%SECIM%"=="5" .venv\Scripts\python -m bot.analiz
 
 echo.
