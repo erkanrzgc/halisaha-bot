@@ -31,8 +31,14 @@ class GirisHatasi(RuntimeError):
 
 
 def giris_yap(page: Page, tc: str, sifre: str) -> None:
-    page.goto(config.BASE_URL + GIRIS_PATH, wait_until="domcontentloaded")
-    page.wait_for_selector("#txtTCPasaport", timeout=POSTBACK_TIMEOUT_MS)
+    yanit = page.goto(config.BASE_URL + GIRIS_PATH, wait_until="domcontentloaded")
+    try:
+        page.wait_for_selector("#txtTCPasaport", timeout=POSTBACK_TIMEOUT_MS)
+    except PlaywrightTimeout as e:
+        # Engel/Cloudflare sayfası mı, anlamak için ne gördüğümüzü yaz.
+        durum = yanit.status if yanit else "?"
+        metin = " ".join((page.inner_text("body") or "").split())[:200]
+        raise GirisHatasi(f"Giriş sayfası açılmadı (HTTP {durum}, başlık {page.title()!r}): {metin}") from e
     page.fill("#txtTCPasaport", tc)
     page.fill("#txtSifre", sifre)
     page.click("#btnGirisYap")
