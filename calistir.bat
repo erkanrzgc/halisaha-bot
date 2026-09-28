@@ -28,7 +28,7 @@ set /p SECIM=Secim (1-5):
 if "%SECIM%"=="1" .venv\Scripts\python -m bot.main --dry-run
 if "%SECIM%"=="2" .venv\Scripts\python -m bot.main
 if "%SECIM%"=="3" .venv\Scripts\python -m bot.main --sure 10
-if "%SECIM%"=="4" .venv\Scripts\python -m bot.nobetci
+if "%SECIM%"=="4" call nobetci.bat
 if "%SECIM%"=="5" .venv\Scripts\python -m bot.analiz
 
 echo.

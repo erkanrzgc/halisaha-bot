@@ -9,12 +9,14 @@ python -m bot.nobetci
 import argparse
 import csv
 import logging
+import os
+import threading
 import time
+from logging.handlers import RotatingFileHandler
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from bot import config, notify, site
@@ -28,6 +30,11 @@ SICAK_ARALIK_SN = 3
 HATA_BEKLEME_SN = 30
 SEPET_KONTROL_SN = 30 * 60
 SMS_SONRASI_BEKLEME_SN = 10 * 60  # SMS cevapsız kaldıysa hemen yeni SMS göndertme
+MAX_UST_USTE_HATA = 10
+TAKILMA_SN = 6 * 60  # bir tur bu kadar sürerse süreç takılmıştır; kapat, bat yeniden başlatsın
+LOG_YOLU = Path("nobetci.log")
+SAYFA_YENILE_SN = 30 * 60
+NABIZ_SN = 5 * 60  # bu aralıkla "çalışıyorum" satırı loglanır
 
 SicakSaat = tuple[int, int]  # (haftanın günü, saat)
 
@@ -52,6 +59,35 @@ def sicak_mi(an: datetime, saatler: set[SicakSaat]) -> bool:
     return (an.weekday(), an.hour) in saatler
 
 
+class _Bekci:
+    """Takılma bekçisi: döngü belirli süre ilerlemezse süreci öldürür (bat dosyası yeniden başlatır).
+    SMS beklerken (4 dk) de döngü durduğu için süre bundan uzun tutulur."""
+
+    def __init__(self, sure_sn: int) -> None:
+        self._sure = sure_sn
+        self._son = time.monotonic()
+        threading.Thread(target=self._izle, daemon=True).start()
+
+    def besle(self) -> None:
+        self._son = time.monotonic()
+
+    def _izle(self) -> None:
+        while True:
+            time.sleep(30)
+            if time.monotonic() - self._son > self._sure:
+                log.error("Nöbetçi %d sn'dir ilerlemiyor, kapatılıyor", self._sure)
+                logging.shutdown()
+                os._exit(3)
+
+
+def _yeni_sayfa(tarayici, eski):
+    try:
+        eski.close()
+    except Exception:  # noqa: BLE001 — çökmüş sayfa kapanırken de hata verebilir
+        pass
+    return tarayici.new_page(locale="tr-TR", timezone_id="Europe/Istanbul")
+
+
 def _durum(tablolar: dict[str, list]) -> dict[tuple[str, str, str], str]:
     return {(salon, s.tarih.isoformat(), s.saat): s.durum for salon, ss in tablolar.items() for s in ss}
 
@@ -63,13 +99,23 @@ def calistir(ayar: config.Ayarlar) -> None:
     alinan: set[date] = set()
     son_sepet_kontrol = 0.0
     sms_bekle_bitis = 0.0
+    ust_uste_hata = 0
+    bekci = _Bekci(TAKILMA_SN)
     with sync_playwright() as p:
         tarayici = p.chromium.launch(headless=True)
         page = tarayici.new_page(locale="tr-TR", timezone_id="Europe/Istanbul")
+        sayfa_acilis = time.monotonic()
+        tur, son_nabiz = 0, time.monotonic()
         girildi = False
         notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, "👀 Nöbetçi başladı.")
         while True:
+            bekci.besle()
             an = datetime.now(TR)
+            if time.monotonic() - sayfa_acilis > SAYFA_YENILE_SN:
+                # Uzun ömürlü sayfa belleği şişirip çöküyor; periyodik olarak tazele.
+                page = _yeni_sayfa(tarayici, page)
+                sayfa_acilis = time.monotonic()
+                girildi = False
             try:
                 if not girildi:
                     site.giris_yap(page, ayar.tc, ayar.sifre)
@@ -78,13 +124,24 @@ def calistir(ayar: config.Ayarlar) -> None:
                     alinan = site.sepet_tarihleri(page)
                     son_sepet_kontrol = time.monotonic()
                 tablolar = {salon: site.tabloyu_getir(page, salon) for salon in config.SALONLAR}
-            except (PlaywrightError, site.GirisHatasi) as e:
-                log.warning("Okunamadı: %s", str(e)[:150])
+            except Exception as e:  # noqa: BLE001 — nöbetçi hiçbir hatada ölmemeli
+                ust_uste_hata += 1
+                log.warning("Okunamadı (%d): %s: %s", ust_uste_hata, type(e).__name__, str(e)[:200])
                 yaz([{"zaman": an.isoformat(timespec="seconds"), "salon": "HATA", "tarih": "", "saat": "",
                       "eski": "", "yeni": type(e).__name__}])
+                if ust_uste_hata >= MAX_UST_USTE_HATA:
+                    raise SystemExit("Üst üste çok hata; bat dosyası yeniden başlatacak") from e
+                # Çöken sayfada ("Target crashed") işlem takılıp kalıyor: her hatada temiz sayfa aç.
+                page = _yeni_sayfa(tarayici, page)
+                sayfa_acilis = time.monotonic()
                 girildi = False
                 time.sleep(HATA_BEKLEME_SN)
                 continue
+            ust_uste_hata = 0
+            tur += 1
+            if time.monotonic() - son_nabiz > NABIZ_SN:
+                log.info("Nabız: %d tur tamam, %s", tur, "sıcak saat" if sicak_mi(an, saatler) else "sakin saat")
+                son_nabiz = time.monotonic()
 
             simdi = _durum(tablolar)
             degisim = ([(k, "baslangic", v) for k, v in sorted(simdi.items())] if onceki is None
@@ -108,8 +165,8 @@ def calistir(ayar: config.Ayarlar) -> None:
                     sms_istendi = al(page, ayar, aday)
                 except site.YanlisSeans as e:
                     log.warning("Tıklama iptal: %s", e)
-                except PlaywrightError as e:
-                    log.warning("Alırken hata: %s", str(e)[:150])
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Alırken hata: %s: %s", type(e).__name__, str(e)[:150])
                     notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"⚠️ Seansı alırken hata: {str(e)[:150]}")
                     sms_istendi = True  # SMS gitmiş olabilir; üst üste SMS göndertmeyelim
                 if sms_istendi:
@@ -121,7 +178,12 @@ def calistir(ayar: config.Ayarlar) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.StreamHandler(),
+                  RotatingFileHandler(LOG_YOLU, maxBytes=2_000_000, backupCount=3, encoding="utf-8")],
+    )
     load_dotenv()
     argparse.ArgumentParser(description=__doc__).parse_args()
     calistir(config.ayarlari_yukle())
