@@ -68,3 +68,13 @@ def test_gecmis_gun_atlanir():
     cmt = date(2026, 9, 26)
     tablolar = {"S1": [musait(CUMA_T, "21:00 - 22:00")]}
     assert en_iyi_aday(HEDEFLER, tablolar, cmt) is None
+
+
+def test_gruplar_bagimsiz_persembe_alindiysa_cuma_denenir():
+    from bot.secim import grup_adayi
+    per, cum = date(2026, 9, 24), CUMA_T
+    gruplar = ((Hedef(3, "21:00 - 22:00"),), (Hedef(CUMA, "21:00 - 22:00"), Hedef(CUMARTESI, "21:00 - 22:00")))
+    tablolar = {"S2": [musait(per, "21:00 - 22:00"), musait(cum, "21:00 - 22:00"), musait(CMT_T, "21:00 - 22:00")]}
+    assert grup_adayi(gruplar, tablolar, SALI, set()).tarih == per
+    assert grup_adayi(gruplar, tablolar, SALI, {per}).tarih == cum
+    assert grup_adayi(gruplar, tablolar, SALI, {per, cum}) is None  # Cuma alındı → Cumartesi denenmez

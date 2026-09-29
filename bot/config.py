@@ -9,6 +9,7 @@ SEPET_PATH = "/uyesepet.aspx"
 SALONLAR = ("HALI SAHA 1", "HALI SAHA 2")  # öncelik sırası
 
 # Python weekday: Pazartesi=0 ... Pazar=6
+PERSEMBE = 3
 CUMA = 4
 CUMARTESI = 5
 PAZAR = 6
@@ -25,7 +26,13 @@ class Hedef:
 # Günde 1 seans kuralı var: sıradaki ilk müsait seans alınır, sonra durulur.
 # Gün sırası Cuma → Cumartesi → Pazar. Her saat için önce Salon 1, sonra 2.
 SAAT_SIRASI = ("21:00 - 22:00", "22:00 - 23:00", "20:00 - 21:00")
-HEDEFLER = tuple(Hedef(gun, saat) for gun in (CUMA, CUMARTESI, PAZAR) for saat in SAAT_SIRASI)
+# Gruplar birbirinden bağımsız (farklı günler, ikisi de alınabilir). Grup içinde gün sırası yedek zinciridir:
+# Cuma alınırsa Cumartesi/Pazar denenmez.
+GUN_GRUPLARI = ((PERSEMBE,), (CUMA, CUMARTESI, PAZAR))
+HEDEF_GRUPLARI = tuple(
+    tuple(Hedef(gun, saat) for gun in grup for saat in SAAT_SIRASI) for grup in GUN_GRUPLARI
+)
+HEDEFLER = tuple(h for grup in HEDEF_GRUPLARI for h in grup)
 
 # Tabloda "bizim" rezervasyonumuzu gösteren etiket(ler). Canlı testte görülünce doldurulacak;
 # boşken bot Cuma'yı aldıktan sonra Cumartesi'yi de dener (SMS'i cevaplamazsan alınmaz).

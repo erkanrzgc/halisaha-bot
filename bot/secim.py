@@ -68,3 +68,20 @@ def en_iyi_aday(
 
 def acilmis_gunler(tablolar: dict[str, list[Seans]]) -> set[date]:
     return {s.tarih for seanslar in tablolar.values() for s in seanslar}
+
+
+def grup_adayi(
+    gruplar: tuple[tuple[Hedef, ...], ...],
+    tablolar: dict[str, list[Seans]],
+    bugun: date,
+    alinan: set[date],
+) -> Aday | None:
+    """İlk sıradaki, henüz günü alınmamış gruptan en iyi aday. Bir grubun herhangi bir günü
+    sepetteyse o grup tamamdır (yedek günleri de denenmez)."""
+    for grup in gruplar:
+        if {hafta_tarihi(bugun, h.gun) for h in grup} & alinan:
+            continue
+        aday = en_iyi_aday(grup, tablolar, bugun)
+        if aday:
+            return aday
+    return None

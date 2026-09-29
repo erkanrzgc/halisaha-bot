@@ -22,11 +22,13 @@ from playwright.sync_api import sync_playwright
 from bot import config, notify, site
 from bot.gozlem import CSV_YOLU, YOK, farklar, son_durum, yaz
 from bot.main import TR, al
-from bot.secim import en_iyi_aday, hafta_tarihi
+from bot.secim import grup_adayi
 
 log = logging.getLogger("nobetci")
 SAKIN_ARALIK_SN = 10
 SICAK_ARALIK_SN = 3
+KESKIN_ARALIK_SN = 2
+HEDEF_SAATLER = {int(saat[:2]) for saat in config.SAAT_SIRASI}
 HATA_BEKLEME_SN = 30
 SEPET_KONTROL_SN = 30 * 60
 SMS_SONRASI_BEKLEME_SN = 10 * 60  # SMS cevapsız kaldıysa hemen yeni SMS göndertme
@@ -53,6 +55,15 @@ def sicak_saatler(yol: Path) -> set[SicakSaat]:
                 t = an + timedelta(hours=fark)
                 saatler.add((t.weekday(), t.hour))
     return saatler
+
+
+def acilis_penceresinde(an: datetime, hedef_saatler: set[int]) -> bool:
+    """Seanslar başlamadan ~72 saat önce, tam saat başında açılıyor. Hedef saatlerin başına
+    2 dk kala ile 5 dk sonrası arası 'keskin nişancı' penceresi."""
+    for h in hedef_saatler:
+        if (an.hour == (h - 1) % 24 and an.minute >= 58) or (an.hour == h and an.minute < 5):
+            return True
+    return False
 
 
 def sicak_mi(an: datetime, saatler: set[SicakSaat]) -> bool:
@@ -153,10 +164,9 @@ def calistir(ayar: config.Ayarlar) -> None:
                     saatler |= {(an.weekday(), an.hour)}  # yeni açılış: bu saati de sıcak say
             onceki = simdi
 
-            hedef_tarihleri = {hafta_tarihi(an.date(), h.gun) for h in config.HEDEFLER}
             aday = None
-            if not (alinan & hedef_tarihleri) and time.monotonic() >= sms_bekle_bitis:
-                aday = en_iyi_aday(config.HEDEFLER, tablolar, an.date())
+            if time.monotonic() >= sms_bekle_bitis:
+                aday = grup_adayi(config.HEDEF_GRUPLARI, tablolar, an.date(), alinan)
             if aday:
                 log.info("Aday: %s %s %s", aday.tarih, aday.seans.saat, aday.salon)
                 sms_istendi = False
@@ -174,7 +184,10 @@ def calistir(ayar: config.Ayarlar) -> None:
                     sms_bekle_bitis = time.monotonic() + SMS_SONRASI_BEKLEME_SN
                 continue
 
-            time.sleep(SICAK_ARALIK_SN if sicak_mi(an, saatler) else SAKIN_ARALIK_SN)
+            if acilis_penceresinde(an, HEDEF_SAATLER):
+                time.sleep(KESKIN_ARALIK_SN)
+            else:
+                time.sleep(SICAK_ARALIK_SN if sicak_mi(an, saatler) else SAKIN_ARALIK_SN)
 
 
 def main() -> None:

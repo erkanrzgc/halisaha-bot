@@ -26,3 +26,12 @@ def test_sicak_mi():
 
 def test_csv_yoksa_bos(tmp_path):
     assert sicak_saatler(tmp_path / "yok.csv") == set()
+
+
+def test_acilis_penceresi():
+    from bot.nobetci import acilis_penceresinde
+    saatler = {20, 21, 22}
+    assert acilis_penceresinde(datetime(2026, 9, 29, 20, 58), saatler)
+    assert acilis_penceresinde(datetime(2026, 9, 29, 21, 3), saatler)
+    assert not acilis_penceresinde(datetime(2026, 9, 29, 21, 10), saatler)
+    assert not acilis_penceresinde(datetime(2026, 9, 29, 14, 0), saatler)
