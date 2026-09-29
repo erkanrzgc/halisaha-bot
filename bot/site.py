@@ -39,7 +39,7 @@ class GirisKotasi(GirisHatasi):
 
 OTURUM_YOLU = Path(".oturum.json")  # çerezler; .gitignore'da, paylaşma
 SAYAC_YOLU = Path(".giris_sayaci.json")
-GUNLUK_GIRIS_LIMITI = 5
+GUNLUK_GIRIS_LIMITI = 8
 KOTA_METNI = "giriş kotanızı"
 
 
