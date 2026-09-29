@@ -1,6 +1,6 @@
 # Halısaha Bot
 
-Florya Spor Tesisi Halı Saha 1/2 için Cuma (olmazsa Cumartesi, o da olmazsa Pazar) akşam seansını yakalar.
+Florya Spor Tesisi Halı Saha 1/2 için Perşembe (olmazsa Cuma, o da olmazsa Cumartesi) akşam seansını yakalar.
 Sıra: 21-22 → 22-23 → 20-21, her saatte önce Saha 1 sonra Saha 2. Günde 1 seans kuralı var.
 
 Akış: giriş → tablo → Rezervasyon → Sepete Ekle → Telegram'dan SMS kodunu sana sorar →

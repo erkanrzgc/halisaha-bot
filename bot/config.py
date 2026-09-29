@@ -24,11 +24,11 @@ class Hedef:
 
 
 # Günde 1 seans kuralı var: sıradaki ilk müsait seans alınır, sonra durulur.
-# Gün sırası Cuma → Cumartesi → Pazar. Her saat için önce Salon 1, sonra 2.
+# Gün sırası Perşembe → Cuma → Cumartesi. Her saat için önce Salon 1, sonra 2.
 SAAT_SIRASI = ("21:00 - 22:00", "22:00 - 23:00", "20:00 - 21:00")
 # Gruplar birbirinden bağımsız (farklı günler, ikisi de alınabilir). Grup içinde gün sırası yedek zinciridir:
 # Cuma alınırsa Cumartesi/Pazar denenmez.
-GUN_GRUPLARI = ((PERSEMBE,), (CUMA, CUMARTESI, PAZAR))
+GUN_GRUPLARI = ((PERSEMBE, CUMA, CUMARTESI),)  # tek zincir: biri alınınca durur
 HEDEF_GRUPLARI = tuple(
     tuple(Hedef(gun, saat) for gun in grup for saat in SAAT_SIRASI) for grup in GUN_GRUPLARI
 )
