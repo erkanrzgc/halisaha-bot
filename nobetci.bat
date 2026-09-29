@@ -8,5 +8,5 @@ set PYTHONIOENCODING=utf-8
 echo [%date% %time%] Nobetci baslatiliyor...
 .venv\Scripts\python -m bot.nobetci
 echo [%date% %time%] Nobetci durdu (kod %errorlevel%), 30 sn sonra yeniden baslayacak. Kapatmak icin pencereyi kapat.
-timeout /t 30 /nobreak >nul
+"%SystemRoot%\System32\timeout.exe" /t 30 /nobreak >nul
 goto basla
