@@ -89,9 +89,9 @@ def calistir(ayar: config.Ayarlar, hedefler: tuple[config.Hedef, ...],
     uyarilan: set[str] = set()
     with sync_playwright() as p:
         tarayici = p.chromium.launch(headless=True)
-        page = tarayici.new_page(locale="tr-TR", timezone_id="Europe/Istanbul")
+        page = site.oturum_baglami(tarayici).new_page()
         try:
-            site.giris_yap(page, ayar.tc, ayar.sifre)
+            site.oturumu_garanti_et(page, ayar.tc, ayar.sifre)
             log.info("Giriş başarılı")
             sepettekiler = site.sepet_tarihleri(page) & {hafta_tarihi(bugun(), h.gun) for h in hedefler}
             if sepettekiler:
@@ -155,7 +155,7 @@ def calistir(ayar: config.Ayarlar, hedefler: tuple[config.Hedef, ...],
 
 def _yeniden_giris(page: Page, ayar: config.Ayarlar) -> None:
     try:
-        site.giris_yap(page, ayar.tc, ayar.sifre)
+        site.oturumu_garanti_et(page, ayar.tc, ayar.sifre)
     except (PlaywrightError, site.GirisHatasi) as e:
         log.warning("Yeniden giriş başarısız, sonraki turda tekrar denenecek: %s", e)
 

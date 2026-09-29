@@ -9,3 +9,5 @@ __pycache__/
 !/requirements.txt
 /gozlem.csv
 /nobetci.log*
+/.oturum.json
+/.giris_sayaci.json

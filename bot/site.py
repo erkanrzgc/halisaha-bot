@@ -1,12 +1,15 @@
 """spor.istanbul sitesiyle Playwright üzerinden konuşan katman. Tüm seçiciler burada."""
+import json
 import logging
+import re
 from datetime import date
+from pathlib import Path
 
-from playwright.sync_api import Page
+from playwright.sync_api import Browser, BrowserContext, Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 from bot import config
-from bot.tablo import Seans, seanslari_oku, sepetteki_tarihler
+from bot.tablo import SepetKalemi, Seans, seanslari_oku, sepet_kalemleri, sepetteki_tarihler
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +33,62 @@ class GirisHatasi(RuntimeError):
     pass
 
 
+class GirisKotasi(GirisHatasi):
+    """Site günlük giriş kotası doldu ya da kendi günlük limitimize geldik: ertesi güne kadar giriş yok."""
+
+
+OTURUM_YOLU = Path(".oturum.json")  # çerezler; .gitignore'da, paylaşma
+SAYAC_YOLU = Path(".giris_sayaci.json")
+GUNLUK_GIRIS_LIMITI = 5
+KOTA_METNI = "giriş kotanızı"
+
+
+def bugunku_giris_sayisi(yol: Path = SAYAC_YOLU, bugun: date | None = None) -> int:
+    bugun = bugun or date.today()
+    try:
+        veri = json.loads(yol.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    return int(veri.get(bugun.isoformat(), 0))
+
+
+def _giris_say(yol: Path = SAYAC_YOLU) -> int:
+    bugun = date.today().isoformat()
+    sayi = bugunku_giris_sayisi(yol) + 1
+    yol.write_text(json.dumps({bugun: sayi}), encoding="utf-8")
+    return sayi
+
+
+def oturum_baglami(tarayici: Browser) -> BrowserContext:
+    """Kayıtlı çerezlerle bağlam açar; böylece yeniden başlayınca tekrar giriş gerekmez."""
+    ayar = {"locale": "tr-TR", "timezone_id": "Europe/Istanbul"}
+    if OTURUM_YOLU.exists():
+        try:
+            return tarayici.new_context(storage_state=str(OTURUM_YOLU), **ayar)
+        except Exception as e:  # noqa: BLE001 — bozuk dosya: sıfırdan
+            log.warning("Kayıtlı oturum açılamadı: %s", e)
+    return tarayici.new_context(**ayar)
+
+
+def oturumu_garanti_et(page: Page, tc: str, sifre: str) -> None:
+    """Önce mevcut oturumla kiralama sayfasını dener; sadece gerçekten çıkış yapılmışsa giriş yapar."""
+    page.goto(config.BASE_URL + config.KIRALIK_PATH, wait_until="domcontentloaded")
+    try:
+        page.wait_for_selector("#lblAdSoyad, #txtTCPasaport", timeout=POSTBACK_TIMEOUT_MS)
+    except PlaywrightTimeout:
+        pass
+    if page.query_selector("#lblAdSoyad"):
+        return
+    giris_yap(page, tc, sifre)
+    page.context.storage_state(path=str(OTURUM_YOLU))
+
+
 def giris_yap(page: Page, tc: str, sifre: str) -> None:
+    sayi = bugunku_giris_sayisi()
+    if sayi >= GUNLUK_GIRIS_LIMITI:
+        raise GirisKotasi(f"Bugün zaten {sayi} kez giriş yapıldı, limit {GUNLUK_GIRIS_LIMITI}")
+    log.info("Giriş yapılıyor (bugün %d. giriş)", sayi + 1)
+    _giris_say()
     yanit = page.goto(config.BASE_URL + GIRIS_PATH, wait_until="domcontentloaded")
     try:
         page.wait_for_selector("#txtTCPasaport", timeout=POSTBACK_TIMEOUT_MS)
@@ -45,6 +103,8 @@ def giris_yap(page: Page, tc: str, sifre: str) -> None:
     try:
         page.wait_for_selector("#lblAdSoyad", timeout=POSTBACK_TIMEOUT_MS)
     except PlaywrightTimeout as e:
+        if KOTA_METNI in (page.inner_text("body") or "").lower():
+            raise GirisKotasi("Site günlük giriş kotası doldu") from e
         raise GirisHatasi(f"Giriş başarısız, sayfa: {page.url}") from e
 
 
@@ -109,6 +169,18 @@ def tabloyu_getir(page: Page, salon: str) -> list[Seans]:
     return seanslari_oku(page.content())
 
 
+SECILI_RE = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{4})\s*\(\s*(\d{2}:\d{2})")
+
+
+def secili_seans_uyuyor(metin: str, seans: Seans) -> bool:
+    """'1.10.2026 (14:00:00 - 15:00:00)' gibi metin (gün/ay başında sıfır olmayabilir) hedefle aynı mı."""
+    m = SECILI_RE.search(metin)
+    if not m:
+        return False
+    gun, ay, yil, saat = m.groups()
+    return date(int(yil), int(ay), int(gun)) == seans.tarih and saat == seans.saat[:5]
+
+
 def sepete_ekle(page: Page, salon: str, seans: Seans) -> None:
     """Rezervasyon → alert'i onayla → Sepete Ekle. Sonunda SMS kutusu görünür olmalı."""
     seansi_dogrula(page, salon, seans)
@@ -117,7 +189,7 @@ def sepete_ekle(page: Page, salon: str, seans: Seans) -> None:
     page.wait_for_selector(SEPETE_EKLE, timeout=POSTBACK_TIMEOUT_MS)
     # Sayfa "24.09.2026 (14:00:00 - 15:00:00)" gösterir; sepete atmadan önce doğru seans mı bak.
     secilen = page.text_content(SECILI_SEANS) or ""
-    if f"{seans.tarih:%d.%m.%Y}" not in secilen or seans.saat[:5] not in secilen:
+    if not secili_seans_uyuyor(secilen, seans):
         raise YanlisSeans(f"Seçili seans {secilen.strip()!r}, beklenen {seans.tarih} {seans.saat}")
     page.click(SEPETE_EKLE)
     page.wait_for_selector(SMS_KUTUSU, state="visible", timeout=POSTBACK_TIMEOUT_MS)
@@ -133,3 +205,22 @@ def sepet_tarihleri(page: Page) -> set[date]:
     page.goto(config.BASE_URL + config.SEPET_PATH, wait_until="domcontentloaded")
     page.wait_for_selector("#lblAdSoyad", timeout=POSTBACK_TIMEOUT_MS)
     return sepetteki_tarihler(page.content())
+
+
+def sepeti_oku(page: Page) -> list[SepetKalemi]:
+    page.goto(config.BASE_URL + config.SEPET_PATH, wait_until="domcontentloaded")
+    page.wait_for_selector("#lblAdSoyad", timeout=POSTBACK_TIMEOUT_MS)
+    return sepet_kalemleri(page.content(), tuple(SALON_IDLERI))
+
+
+def sepetten_sil(page: Page, kalem: SepetKalemi) -> None:
+    """Sepet sayfasında ilgili satırın 'Ürünü Kaldır' butonuna basar (confirm onaylanır)."""
+    guncel = next((k for k in sepeti_oku(page) if (k.tarih, k.saat, k.salon) == (kalem.tarih, kalem.saat, kalem.salon)), None)
+    if not guncel or not guncel.sil_id:
+        return
+    page.once("dialog", lambda d: d.accept())
+    with page.expect_navigation(timeout=POSTBACK_TIMEOUT_MS):
+        page.click(f"#{guncel.sil_id}")
+    kalan = sepet_kalemleri(page.content(), tuple(SALON_IDLERI))
+    if any((k.tarih, k.saat, k.salon) == (kalem.tarih, kalem.saat, kalem.salon) for k in kalan):
+        raise RuntimeError(f"Sepetten silinemedi: {kalem}")

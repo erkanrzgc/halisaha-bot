@@ -22,7 +22,7 @@ from playwright.sync_api import sync_playwright
 from bot import config, notify, site
 from bot.gozlem import CSV_YOLU, YOK, farklar, son_durum, yaz
 from bot.main import TR, al
-from bot.secim import grup_adayi
+from bot.secim import grup_adayi, hafta_tarihi, yukseltme_adayi
 
 log = logging.getLogger("nobetci")
 SAKIN_ARALIK_SN = 10
@@ -91,12 +91,35 @@ class _Bekci:
                 os._exit(3)
 
 
-def _yeni_sayfa(tarayici, eski):
+def _yukseltme(sepet: list, tablolar: dict[str, list], bugun: date):
+    """Sepetteki bir hedef-gün seansından daha öncelikli bir seans müsaitse (kalem, aday) döner."""
+    for grup in config.HEDEF_GRUPLARI:
+        gunler = {hafta_tarihi(bugun, h.gun) for h in grup}
+        for kalem in sepet:
+            if kalem.tarih in gunler:
+                aday = yukseltme_adayi(grup, tablolar, bugun, kalem.tarih, kalem.saat)
+                if aday:
+                    return kalem, aday
+    return None, None
+
+
+def _yeni_sayfa(baglam, eski):
+    """Aynı bağlamda (aynı çerezler, yani aynı oturum) temiz sayfa; tekrar giriş gerektirmez."""
     try:
         eski.close()
     except Exception:  # noqa: BLE001 — çökmüş sayfa kapanırken de hata verebilir
         pass
-    return tarayici.new_page(locale="tr-TR", timezone_id="Europe/Istanbul")
+    return baglam.new_page()
+
+
+def _yarina_kadar_bekle(bekci: "_Bekci") -> None:
+    """Giriş kotası doldu: ertesi gün 00:05'e kadar bekçiyi besleyerek uyu."""
+    simdi = datetime.now(TR)
+    hedef = (simdi + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+    log.warning("Giriş kotası doldu, %s'e kadar bekleniyor", hedef.strftime("%d.%m %H:%M"))
+    while datetime.now(TR) < hedef:
+        bekci.besle()
+        time.sleep(60)
 
 
 def _durum(tablolar: dict[str, list]) -> dict[tuple[str, str, str], str]:
@@ -107,14 +130,15 @@ def calistir(ayar: config.Ayarlar) -> None:
     onceki = son_durum(CSV_YOLU) or None
     saatler = sicak_saatler(CSV_YOLU)
     log.info("Öğrenilmiş sıcak saat sayısı: %d", len(saatler))
-    alinan: set[date] = set()
+    sepet: list = []
     son_sepet_kontrol = 0.0
     sms_bekle_bitis = 0.0
     ust_uste_hata = 0
     bekci = _Bekci(TAKILMA_SN)
     with sync_playwright() as p:
         tarayici = p.chromium.launch(headless=True)
-        page = tarayici.new_page(locale="tr-TR", timezone_id="Europe/Istanbul")
+        baglam = site.oturum_baglami(tarayici)
+        page = baglam.new_page()
         sayfa_acilis = time.monotonic()
         tur, son_nabiz = 0, time.monotonic()
         girildi = False
@@ -123,18 +147,29 @@ def calistir(ayar: config.Ayarlar) -> None:
             bekci.besle()
             an = datetime.now(TR)
             if time.monotonic() - sayfa_acilis > SAYFA_YENILE_SN:
-                # Uzun ömürlü sayfa belleği şişirip çöküyor; periyodik olarak tazele.
-                page = _yeni_sayfa(tarayici, page)
+                # Uzun ömürlü sayfa belleği şişirip çöküyor; periyodik olarak tazele (oturum korunur).
+                try:
+                    baglam.storage_state(path=str(site.OTURUM_YOLU))
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Oturum kaydedilemedi: %s", e)
+                page = _yeni_sayfa(baglam, page)
                 sayfa_acilis = time.monotonic()
                 girildi = False
             try:
                 if not girildi:
-                    site.giris_yap(page, ayar.tc, ayar.sifre)
+                    site.oturumu_garanti_et(page, ayar.tc, ayar.sifre)
                     girildi = True
                 if time.monotonic() - son_sepet_kontrol > SEPET_KONTROL_SN:
-                    alinan = site.sepet_tarihleri(page)
+                    sepet = site.sepeti_oku(page)
                     son_sepet_kontrol = time.monotonic()
                 tablolar = {salon: site.tabloyu_getir(page, salon) for salon in config.SALONLAR}
+            except site.GirisKotasi as e:
+                log.warning("%s", e)
+                notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id,
+                                    f"⛔ {e}. Yarın 00:05'te devam edeceğim.")
+                _yarina_kadar_bekle(bekci)
+                girildi = False
+                continue
             except Exception as e:  # noqa: BLE001 — nöbetçi hiçbir hatada ölmemeli
                 ust_uste_hata += 1
                 log.warning("Okunamadı (%d): %s: %s", ust_uste_hata, type(e).__name__, str(e)[:200])
@@ -143,7 +178,7 @@ def calistir(ayar: config.Ayarlar) -> None:
                 if ust_uste_hata >= MAX_UST_USTE_HATA:
                     raise SystemExit("Üst üste çok hata; bat dosyası yeniden başlatacak") from e
                 # Çöken sayfada ("Target crashed") işlem takılıp kalıyor: her hatada temiz sayfa aç.
-                page = _yeni_sayfa(tarayici, page)
+                page = _yeni_sayfa(baglam, page)
                 sayfa_acilis = time.monotonic()
                 girildi = False
                 time.sleep(HATA_BEKLEME_SN)
@@ -164,9 +199,24 @@ def calistir(ayar: config.Ayarlar) -> None:
                     saatler |= {(an.weekday(), an.hour)}  # yeni açılış: bu saati de sıcak say
             onceki = simdi
 
-            aday = None
+            aday, eski_kalem = None, None
             if time.monotonic() >= sms_bekle_bitis:
-                aday = grup_adayi(config.HEDEF_GRUPLARI, tablolar, an.date(), alinan)
+                eski_kalem, aday = _yukseltme(sepet, tablolar, an.date())
+                if not aday:
+                    aday = grup_adayi(config.HEDEF_GRUPLARI, tablolar, an.date(), {k.tarih for k in sepet})
+            if aday and eski_kalem:
+                # Aynı gün sepette 2. seans olamıyor: önce elimizdekini bırak, sonra daha iyisini al.
+                etiket = f"{eski_kalem.saat} → {aday.seans.saat} ({aday.tarih:%d.%m} {aday.salon})"
+                log.info("Yükseltme: %s", etiket)
+                notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"🔁 Daha iyisi açıldı: {etiket}. Değiştiriyorum!")
+                try:
+                    site.sepetten_sil(page, eski_kalem)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Sepetten silinemedi, yükseltme iptal: %s", str(e)[:150])
+                    notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"⚠️ {eski_kalem.saat} sepetten silinemedi, değiştirmedim.")
+                    son_sepet_kontrol = 0.0
+                    continue
+                sepet = [k for k in sepet if k != eski_kalem]
             if aday:
                 log.info("Aday: %s %s %s", aday.tarih, aday.seans.saat, aday.salon)
                 sms_istendi = False

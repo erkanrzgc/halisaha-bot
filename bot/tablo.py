@@ -76,3 +76,31 @@ def sepetteki_tarihler(html: str) -> set[date]:
         if "FUTBOL" in metin and m:
             tarihler.add(datetime.strptime(m.group(1), "%d.%m.%Y").date())
     return tarihler
+
+
+SEPET_SAAT_RE = re.compile(r"\(\s*(\d{2}:\d{2}):00\s*-\s*(\d{2}:\d{2}):00\s*\)")
+
+
+@dataclass(frozen=True)
+class SepetKalemi:
+    tarih: date
+    saat: str  # "20:00 - 21:00"
+    salon: str
+    sil_id: str | None
+
+
+def sepet_kalemleri(html: str, salonlar: tuple[str, ...]) -> list[SepetKalemi]:
+    """Sepetteki FUTBOL seansları; silmek için satırdaki 'Ürünü Kaldır' butonunun id'si de döner."""
+    soup = BeautifulSoup(html, "html.parser")
+    kalemler: list[SepetKalemi] = []
+    for ad in soup.select("span.product-name"):
+        satir = ad.find_parent("tr")
+        metin = satir.get_text(" ", strip=True) if satir else ad.get_text(strip=True)
+        t, s = TARIH_RE.search(metin), SEPET_SAAT_RE.search(metin)
+        salon = next((x for x in salonlar if x in metin), None)
+        if "FUTBOL" not in metin or not (t and s and salon):
+            continue
+        sil = satir.select_one('a[id*="lbSil"]') if satir else None
+        kalemler.append(SepetKalemi(datetime.strptime(t.group(1), "%d.%m.%Y").date(),
+                                    f"{s.group(1)} - {s.group(2)}", salon, sil["id"] if sil else None))
+    return kalemler

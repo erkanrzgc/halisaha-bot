@@ -25,3 +25,11 @@ def test_sepetteki_tarihler():
     from bot.tablo import sepetteki_tarihler
     assert sepetteki_tarihler(SEPET) == {date(2026, 9, 25)}
     assert sepetteki_tarihler("<html></html>") == set()
+
+
+def test_sepet_kalemleri_sil_id_ile():
+    from bot.tablo import SepetKalemi, sepet_kalemleri
+    html = SEPET.replace("</tr>", '<td><a id="pageContent_repeater_lbSil_0" onclick="return confirm(1)">x</a></td></tr>')
+    assert sepet_kalemleri(html, ("HALI SAHA 1", "HALI SAHA 2")) == [
+        SepetKalemi(date(2026, 9, 25), "14:00 - 15:00", "HALI SAHA 1", "pageContent_repeater_lbSil_0")
+    ]

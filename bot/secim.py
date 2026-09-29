@@ -85,3 +85,24 @@ def grup_adayi(
         if aday:
             return aday
     return None
+
+
+def yukseltme_adayi(
+    grup: tuple[Hedef, ...],
+    tablolar: dict[str, list[Seans]],
+    bugun: date,
+    kalem_tarih: date,
+    kalem_saat: str,
+) -> Aday | None:
+    """Sepetteki seanstan (aynı gün) daha öncelikli ve şu an müsait bir seans var mı?
+    Öncelik, grup içindeki hedef sırasıdır; sepetteki saate gelince aramayı bırakır."""
+    for hedef in grup:
+        if hafta_tarihi(bugun, hedef.gun) != kalem_tarih:
+            continue
+        if hedef.saat == kalem_saat:
+            return None
+        for salon, seanslar in tablolar.items():
+            s = seans_bul(seanslar, kalem_tarih, hedef.saat)
+            if s and s.musait:
+                return Aday(hedef, kalem_tarih, salon, s)
+    return None

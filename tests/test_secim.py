@@ -78,3 +78,19 @@ def test_gruplar_bagimsiz_persembe_alindiysa_cuma_denenir():
     assert grup_adayi(gruplar, tablolar, SALI, set()).tarih == per
     assert grup_adayi(gruplar, tablolar, SALI, {per}).tarih == cum
     assert grup_adayi(gruplar, tablolar, SALI, {per, cum}) is None  # Cuma alındı → Cumartesi denenmez
+
+
+def test_yukseltme_daha_iyisi_acilinca():
+    from bot.secim import yukseltme_adayi
+    grup = (Hedef(CUMA, "21:00 - 22:00"), Hedef(CUMA, "22:00 - 23:00"), Hedef(CUMA, "20:00 - 21:00"))
+    tablolar = {"S1": [dolu(CUMA_T, "20:00 - 21:00", "Sepet")], "S2": [musait(CUMA_T, "21:00 - 22:00")]}
+    a = yukseltme_adayi(grup, tablolar, SALI, CUMA_T, "20:00 - 21:00")
+    assert (a.salon, a.seans.saat) == ("S2", "21:00 - 22:00")
+
+
+def test_yukseltme_zaten_en_iyisi_ya_da_daha_iyisi_yok():
+    from bot.secim import yukseltme_adayi
+    grup = (Hedef(CUMA, "21:00 - 22:00"), Hedef(CUMA, "22:00 - 23:00"), Hedef(CUMA, "20:00 - 21:00"))
+    tablolar = {"S1": [musait(CUMA_T, "22:00 - 23:00"), musait(CUMA_T, "20:00 - 21:00", 2)]}
+    assert yukseltme_adayi(grup, tablolar, SALI, CUMA_T, "21:00 - 22:00") is None  # 22-23 daha düşük
+    assert yukseltme_adayi(grup, {"S1": [dolu(CUMA_T, "21:00 - 22:00")]}, SALI, CUMA_T, "20:00 - 21:00") is None
