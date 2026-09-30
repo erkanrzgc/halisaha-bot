@@ -27,6 +27,7 @@ SECILI_SEANS = "#pageContent_dvSeciliSeansBilgisi"
 SMS_KUTUSU ="#pageContent_txtDogrulamaKodu"
 SMS_GONDER = "#btnCepTelDogrulamaGonder"
 POSTBACK_TIMEOUT_MS = 30_000
+SMS_KABUL_TIMEOUT_MS = 15_000
 
 
 class GirisHatasi(RuntimeError):
@@ -39,7 +40,7 @@ class GirisKotasi(GirisHatasi):
 
 OTURUM_YOLU = Path(".oturum.json")  # çerezler; .gitignore'da, paylaşma
 SAYAC_YOLU = Path(".giris_sayaci.json")
-GUNLUK_GIRIS_LIMITI = 8
+GUNLUK_GIRIS_LIMITI = 10
 KOTA_METNI = "giriş kotanızı"
 
 
@@ -195,10 +196,17 @@ def sepete_ekle(page: Page, salon: str, seans: Seans) -> None:
     page.wait_for_selector(SMS_KUTUSU, state="visible", timeout=POSTBACK_TIMEOUT_MS)
 
 
-def sms_dogrula(page: Page, kod: str) -> None:
+def sms_dogrula(page: Page, kod: str) -> bool:
+    """True: kod kabul edildi (sepet sayfasına geçti). False: SMS kutusu hâlâ açık, yani kod yanlış."""
     page.fill(SMS_KUTUSU, kod)
     page.click(SMS_GONDER)
-    page.wait_for_url(f"**{config.SEPET_PATH.removesuffix('.aspx')}**", timeout=POSTBACK_TIMEOUT_MS)
+    try:
+        page.wait_for_url(f"**{config.SEPET_PATH.removesuffix('.aspx')}**", timeout=SMS_KABUL_TIMEOUT_MS)
+        return True
+    except PlaywrightTimeout:
+        if page.is_visible(SMS_KUTUSU):
+            return False
+        raise
 
 
 def sepet_tarihleri(page: Page) -> set[date]:

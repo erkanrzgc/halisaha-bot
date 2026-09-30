@@ -54,8 +54,8 @@ def eski_mesajlari_temizle(token: str) -> int | None:
     return eski[-1]["update_id"] + 1 if eski else None
 
 
-def kod_bekle(token: str, chat_id: str, offset: int | None, sure_sn: int) -> str | None:
-    """Belirtilen sohbetten gelen ilk 4-8 haneli sayıyı döner; süre dolarsa None."""
+def kod_bekle(token: str, chat_id: str, offset: int | None, sure_sn: int) -> tuple[str | None, int | None]:
+    """Belirtilen sohbetten gelen ilk 4-8 haneli sayıyı ve bir sonraki offset'i döner; süre dolarsa (None, offset)."""
     bitis = time.monotonic() + sure_sn
     while time.monotonic() < bitis:
         bekle = max(1, min(LONG_POLL_SEC, int(bitis - time.monotonic())))
@@ -70,7 +70,7 @@ def kod_bekle(token: str, chat_id: str, offset: int | None, sure_sn: int) -> str
             mesaj = g.get("message") or {}
             if str(mesaj.get("chat", {}).get("id")) != str(chat_id):
                 continue
-            m = KOD_RE.search(mesaj.get("text", ""))
+            m = KOD_RE.search(mesaj.get("text", "").replace(" ", ""))
             if m:
-                return m.group(1)
-    return None
+                return m.group(1), offset
+    return None, offset

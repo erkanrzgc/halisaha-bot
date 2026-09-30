@@ -23,6 +23,7 @@ from bot.secim import Aday, acilmis_gunler, bilinmeyen_etiketler, en_iyi_aday, h
 log = logging.getLogger("halisaha")
 TR = ZoneInfo("Europe/Istanbul")
 SMS_BEKLEME_SN = 4 * 60
+SMS_HAKKI = 3
 MAX_UST_USTE_HATA = 5
 HATA_BEKLEME_SN = 10
 
@@ -66,12 +67,22 @@ def al(page: Page, ayar: config.Ayarlar, aday: Aday) -> bool:
     )).start()
     site.sepete_ekle(page, aday.salon, hedef)
     log.info("%s: Sepete Ekle basıldı, SMS kodu bekleniyor", etiket)
-    kod = notify.kod_bekle(ayar.tg_token, ayar.tg_chat_id, offset, SMS_BEKLEME_SN)
-    log.info("%s: SMS kodu %s", etiket, "geldi" if kod else "gelmedi")
-    if not kod:
-        notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"⌛ {etiket}: SMS kodu gelmedi, işlem yarım kaldı, bot duruyor.")
-        return True
-    site.sms_dogrula(page, kod)
+    bitis = time.monotonic() + SMS_BEKLEME_SN
+    for hak in range(1, SMS_HAKKI + 1):
+        kalan = int(bitis - time.monotonic())
+        kod, offset = notify.kod_bekle(ayar.tg_token, ayar.tg_chat_id, offset, max(kalan, 30))
+        log.info("%s: SMS kodu %s (%d. deneme)", etiket, "geldi" if kod else "gelmedi", hak)
+        if not kod:
+            notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"⌛ {etiket}: SMS kodu gelmedi, işlem yarım kaldı.")
+            return True
+        if site.sms_dogrula(page, kod):
+            break
+        log.info("%s: kod kabul edilmedi", etiket)
+        if hak == SMS_HAKKI:
+            notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"❌ {etiket}: {SMS_HAKKI} kod da kabul edilmedi.")
+            return True
+        notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id,
+                            f"❌ Kod kabul edilmedi! SMS'teki kodu tekrar yaz ({SMS_HAKKI - hak} hak kaldı).")
     if not sepette_mi(page.content(), aday.tarih, aday.seans.saat, aday.salon):
         page.goto(config.BASE_URL + config.SEPET_PATH, wait_until="domcontentloaded")
     if sepette_mi(page.content(), aday.tarih, aday.seans.saat, aday.salon):
