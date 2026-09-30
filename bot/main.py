@@ -75,14 +75,28 @@ def al(page: Page, ayar: config.Ayarlar, aday: Aday) -> bool:
         if not kod:
             notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"⌛ {etiket}: SMS kodu gelmedi, işlem yarım kaldı.")
             return True
-        if site.sms_dogrula(page, kod):
+        sonuc = site.sms_dogrula(page, kod)
+        if sonuc == site.SMS_TAMAM:
             break
-        log.info("%s: kod kabul edilmedi", etiket)
+        log.info("%s: kod kabul edilmedi (%s)", etiket, sonuc)
         if hak == SMS_HAKKI:
             notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"❌ {etiket}: {SMS_HAKKI} kod da kabul edilmedi.")
             return True
+        if sonuc == site.SMS_YANLIS:
+            notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id,
+                                f"❌ Kod kabul edilmedi! SMS'teki kodu tekrar yaz ({SMS_HAKKI - hak} hak kaldı).")
+            continue
+        # Site başa döndü: seans hâlâ boşsa yeniden Sepete Ekle → yeni SMS.
+        yeniden = next((s for s in site.tabloyu_getir(page, aday.salon)
+                        if s.tarih == aday.tarih and s.saat == aday.seans.saat and s.musait), None)
+        if not yeniden:
+            notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id, f"😞 {etiket}: kod yanlıştı, bu arada seans kapıldı.")
+            return True
+        site.sepete_ekle(page, aday.salon, yeniden)
+        bitis = max(bitis, time.monotonic() + 2 * 60)  # yeni SMS için en az 2 dk
         notify.mesaj_gonder(ayar.tg_token, ayar.tg_chat_id,
-                            f"❌ Kod kabul edilmedi! SMS'teki kodu tekrar yaz ({SMS_HAKKI - hak} hak kaldı).")
+                            f"🔁 Kod yanlıştı, seansı yeniden ekledim. YENİ SMS gelecek, onun kodunu yaz "
+                            f"({SMS_HAKKI - hak} hak kaldı).")
     if not sepette_mi(page.content(), aday.tarih, aday.seans.saat, aday.salon):
         page.goto(config.BASE_URL + config.SEPET_PATH, wait_until="domcontentloaded")
     if sepette_mi(page.content(), aday.tarih, aday.seans.saat, aday.salon):

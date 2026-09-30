@@ -196,17 +196,19 @@ def sepete_ekle(page: Page, salon: str, seans: Seans) -> None:
     page.wait_for_selector(SMS_KUTUSU, state="visible", timeout=POSTBACK_TIMEOUT_MS)
 
 
-def sms_dogrula(page: Page, kod: str) -> bool:
-    """True: kod kabul edildi (sepet sayfasına geçti). False: SMS kutusu hâlâ açık, yani kod yanlış."""
+SMS_TAMAM, SMS_YANLIS, SMS_SIFIRLANDI = "tamam", "yanlis", "sifirlandi"
+
+
+def sms_dogrula(page: Page, kod: str) -> str:
+    """SMS_TAMAM: kod kabul edildi (sepete geçti). SMS_YANLIS: kutu hâlâ açık, aynı SMS için tekrar
+    denenebilir. SMS_SIFIRLANDI: site başa döndü; seansı yeniden Sepete Ekle yapmak (yeni SMS) gerekir."""
     page.fill(SMS_KUTUSU, kod)
     page.click(SMS_GONDER)
     try:
         page.wait_for_url(f"**{config.SEPET_PATH.removesuffix('.aspx')}**", timeout=SMS_KABUL_TIMEOUT_MS)
-        return True
+        return SMS_TAMAM
     except PlaywrightTimeout:
-        if page.is_visible(SMS_KUTUSU):
-            return False
-        raise
+        return SMS_YANLIS if page.is_visible(SMS_KUTUSU) else SMS_SIFIRLANDI
 
 
 def sepet_tarihleri(page: Page) -> set[date]:
